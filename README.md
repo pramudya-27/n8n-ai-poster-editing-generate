@@ -1,6 +1,6 @@
 # 🛵 AI Automation Product Poster Edit Generator
 
-Automasi pembuatan poster produk *e-commerce* suku cadang motor secara otomatis menggunakan **n8n**, **Gemini Vision**, **Supabase Vector Search (RAG)**, dan **Wan 2.7 Multimodal Image Generation**.
+Automasi pembuatan poster produk *e-commerce* suku cadang motor secara otomatis menggunakan **n8n**, **Gemini Vision**, **Postgresql Vector Search (RAG)**, dan **Qwen3**.
 
 Cukup kirimkan foto *spare part* via **Telegram**, dan bot akan memproses identifikasi produk, mencocokkan ke database katalog, serta menghasilkan poster siap pakai (*1:1 square aspect ratio*) lengkap dengan teks overlay dan elemen branding profesional.
 
