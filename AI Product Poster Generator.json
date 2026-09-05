@@ -1,0 +1,533 @@
+{
+  "name": "AI Product Poster Generator Push",
+  "nodes": [
+    {
+      "parameters": {
+        "updates": [
+          "message"
+        ],
+        "additionalFields": {
+          "download": true
+        }
+      },
+      "id": "be833bdf-e46e-470c-acdc-30627a7f0d94",
+      "name": "Telegram Trigger",
+      "type": "n8n-nodes-base.telegramTrigger",
+      "typeVersion": 1,
+      "position": [
+        -176,
+        -128
+      ],
+      "webhookId": "c4e93206-1126-4b3c-bd0b-742dfc9b76d1",
+      "credentials": {
+        "telegramApi": {
+          "id": "FxCyyWkiEaa3oy3I",
+          "name": "Telegram account 3"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $input.first();\nconst binaryData = await this.helpers.getBinaryDataBuffer(0, 'data');\nconst base64String = binaryData.toString('base64');\n\nconst photoArray = item.json.message?.photo;\nconst fileId = photoArray && photoArray.length > 0 \n  ? photoArray[photoArray.length - 1].file_id \n  : '';\n\nreturn {\n  json: {\n    base64Image: base64String,\n    mimeType: item.binary?.data?.mimeType || 'image/jpeg',\n    chatId: item.json.message?.chat?.id?.toString() || '',\n    messageId: item.json.message?.message_id || 0,\n    fileId: fileId\n  }\n};"
+      },
+      "id": "8f43c41b-66a7-47b9-848f-96986c15a91c",
+      "name": "Convert Image to Base64",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        224,
+        -128
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key=API_KEY_GEMINI",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n \"contents\": [\n {\n \"parts\": [\n {\n \"text\": \"You are a product identification assistant. Analyze the provided motorcycle spare-part image. Identify only information visually supported by the image. Extract: product_name, brand, product_category, product_type, model, part_number, visible_text. Rules: 1. Do not guess missing information. 2. If information is not visible, return null. 3. Preserve exact visible text. 4. Do not invent specifications. 5. Return valid JSON only. Schema: { \\\"product_name\\\": null, \\\"brand\\\": null, \\\"product_category\\\": null, \\\"product_type\\\": null, \\\"model\\\": null, \\\"part_number\\\": null, \\\"visible_text\\\": [] }\"\n },\n {\n \"inline_data\": {\n \"mime_type\": \"{{ $json.mimeType }}\",\n \"data\": \"{{ $json.base64Image }}\"\n }\n }\n ]\n }\n ],\n \"generationConfig\": {\n \"response_mime_type\": \"application/json\"\n }\n}",
+        "options": {}
+      },
+      "id": "da45630d-d089-4bb5-9eae-a5c879a530d0",
+      "name": "Gemini Vision - Product Identification",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        432,
+        -128
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const input = $input.first().json;\nlet geminiText = input.candidates?.[0]?.content?.parts?.[0]?.text || \"{}\";\ngeminiText = geminiText.replace(/```json/g, '').replace(/```/g, '').trim();\nlet parsed = {};\ntry {\n parsed = JSON.parse(geminiText);\n} catch (e) {\n parsed = {};\n}\nreturn {\n json: {\n product_name: parsed.product_name || null,\n brand: parsed.brand || null,\n product_category: parsed.product_category || null,\n product_type: parsed.product_type || null,\n model: parsed.model || null,\n part_number: parsed.part_number || null,\n visible_text: parsed.visible_text || [],\n base64Image: input.base64Image,\n mimeType: input.mimeType,\n chatId: input.chatId,\n messageId: input.messageId,\n fileId: input.fileId\n }\n};"
+      },
+      "id": "6ee66c8b-2ff9-4d93-9fcf-64d7af4a389f",
+      "name": "Parse Product Identification",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        624,
+        -128
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://generativelanguage.googleapis.com/v1beta/models/gemini-embedding-2:embedContent?key=API_KEY_GEMINI",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"models/gemini-embedding-2\",\n  \"content\": {\n    \"parts\": [\n      {\n        \"text\": \"{{ $json.productText }}\"\n      }\n    ]\n  }\n}",
+        "options": {}
+      },
+      "id": "d002462f-336f-4b4b-ae83-e7026b318d03",
+      "name": "Gemini Embedding",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1040,
+        -128
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Ambil hasil Product Identification\nconst visionItems = $items(\"Parse Product Identification\");\n\nif (!visionItems || visionItems.length === 0) {\n  return [\n    {\n      json: {\n        error: \"Parse Product Identification tidak menghasilkan data\"\n      }\n    }\n  ];\n}\n\nconst visionData = visionItems[0].json;\n\n// Ambil hasil langsung dari SQL node\nconst sqlItems = $items(\"Vector Search\");\n\nconst candidates = sqlItems.map(item => item.json);\n\n// Jika SQL tidak menghasilkan produk\nif (candidates.length === 0) {\n  return [\n    {\n      json: {\n        ...visionData,\n        matchedProduct: null,\n        matchScore: 0,\n        candidateCount: 0,\n        status: \"NO_CANDIDATE_FOUND\"\n      }\n    }\n  ];\n}\n\nlet bestMatch = null;\nlet highestScore = -1;\n\nfor (const candidate of candidates) {\n  let score = 0;\n\n  // Part Number = bobot tertinggi\n  if (\n    visionData.part_number &&\n    candidate.part_number &&\n    String(candidate.part_number).trim().toLowerCase() ===\n    String(visionData.part_number).trim().toLowerCase()\n  ) {\n    score += 10;\n  }\n\n  // Brand\n  if (\n    visionData.brand &&\n    candidate.brand &&\n    String(candidate.brand).trim().toLowerCase() ===\n    String(visionData.brand).trim().toLowerCase()\n  ) {\n    score += 5;\n  }\n\n  // Product Name\n  if (\n    visionData.product_name &&\n    candidate.product_name\n  ) {\n    const visionProduct = String(visionData.product_name).trim().toLowerCase();\n    const candidateProduct = String(candidate.product_name).trim().toLowerCase();\n\n    if (\n      candidateProduct.includes(visionProduct) ||\n      visionProduct.includes(candidateProduct)\n    ) {\n      score += 3;\n    }\n  }\n\n  // Product Category\n  if (\n    visionData.product_category &&\n    candidate.product_category &&\n    String(candidate.product_category).trim().toLowerCase() ===\n    String(visionData.product_category).trim().toLowerCase()\n  ) {\n    score += 2;\n  }\n\n  // Product Type\n  if (\n    visionData.product_type &&\n    candidate.product_type &&\n    String(candidate.product_type).trim().toLowerCase() ===\n    String(visionData.product_type).trim().toLowerCase()\n  ) {\n    score += 2;\n  }\n\n  if (score > highestScore) {\n    highestScore = score;\n    bestMatch = candidate;\n  }\n}\n\nreturn [\n  {\n    json: {\n      ...visionData,\n\n      matchedProduct: bestMatch,\n\n      matchScore: highestScore,\n\n      candidateCount: candidates.length,\n\n      status: bestMatch\n        ? \"MATCH_FOUND\"\n        : \"NO_MATCH\"\n    }\n  }\n];"
+      },
+      "id": "543508ac-a9be-4f22-8c97-e489adda4f6f",
+      "name": "RAG Ranking",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2064,
+        -128
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const input = $input.first().json;\nconst p = input.matchedProduct || {};\nconst v = input;\n\nconst ragContext = {\n product_name: p.product_name || v.product_name || \"Unknown Product\",\n brand: p.brand || v.brand || \"Unknown Brand\",\n product_category: p.product_category || v.product_category || \"Motorcycle Spare Part\",\n product_type: p.product_type || v.product_type || \"Spare Part\",\n model: p.model || v.model || \"N/A\",\n part_number: p.part_number || v.part_number || \"N/A\",\n spec_length: p.spec_length || \"N/A\",\n description: p.description || \"High quality motorcycle spare part.\",\n badge: p.badge || \"100% ORIGINAL\",\n store_name: p.store_name || \"Premium Store\"\n};\n\nreturn {\n json: {\n ...input,\n ragContext: ragContext\n }\n};"
+      },
+      "id": "a3b30668-97b8-4230-bece-453281b44973",
+      "name": "Build RAG Context",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2256,
+        -128
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const ctx = $input.first().json;\n\n// Menyiapkan teks judul dan detail dari RAG Context\nconst productName = (ctx.product_name || \"SPARE PART MOTOR\").toUpperCase();\nconst brand = (ctx.brand || \"YSP\").toUpperCase();\nconst model = ctx.model ? `UNTUK ${ctx.model.toUpperCase()}` : \"\";\nconst fullTitle = `${brand} ${productName} ${model}`.trim();\n\nconst prompt = [\n  'Create a professional e-commerce product poster for an online motorcycle spare part store, based on the provided product image.',\n  \n  'LAYOUT & OVERLAY ELEMENTS TO ADD:',\n  `1. TOP LEFT LOGO: Add a blue rectangular logo badge with white text '${brand} GENUINE PARTS'.`,\n  `2. TOP RIGHT BADGE: Add a circular blue stamp badge with text '100% ORIGINAL'.`,\n  `3. BOTTOM TEXT OVERLAY: At the bottom center, render bold, clean, black typography reading: '${fullTitle}'.`,\n  '4. BACKGROUND: Clean off-white studio background with subtle grey abstract automotive/tire streak textures.',\n  \n  'PRODUCT PRESERVATION RULES:',\n  'Keep the original physical spare part product centered, visible, and unchanged in shape, texture, and color.',\n  'If there are multiple parts (like kampas rem or rumah roller), arrange them neatly side-by-side in the center.',\n  \n  'STYLE:',\n  'Square 1:1 aspect ratio, clean Indonesian marketplace catalog style, sharp typography, professional product presentation.'\n].join('\\n');\n\nreturn [\n  {\n    json: {\n      ...ctx,\n      wanPrompt: prompt\n    }\n  }\n];"
+      },
+      "id": "176ba45e-745b-417f-8a35-cff1f756e666",
+      "name": "Build Wan Prompt",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2464,
+        -128
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://llm-w5kbdmh8hiposy31.ap-southeast-1.maas.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "Bearer API_KEY_DASHCOPE"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  model: \"wan2.7-image\",\n  input: {\n    messages: [\n      {\n        role: \"user\",\n        content: [\n          {\n            image: \"data:\" + $('Convert Image to Base64').first().json.mimeType + \";base64,\" + $('Convert Image to Base64').first().json.base64Image\n          },\n          {\n            text: $json.wanPrompt\n          }\n        ]\n      }\n    ]\n  },\n  parameters: {\n    size: \"2K\",\n    n: 1,\n    watermark: false\n  }\n}) }}",
+        "options": {}
+      },
+      "id": "5e94608e-f86f-4245-a5c7-60a16fc62f3b",
+      "name": "Wan 2.7 Image Editing",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2656,
+        -128
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const input = $input.first().json;\n\nconst choices = input.output?.choices || [];\n\nif (!choices.length) {\n  throw new Error(\n    `Wan API tidak mengembalikan choices. Response: ${JSON.stringify(input)}`\n  );\n}\n\nconst content = choices[0]?.message?.content || [];\n\nconst imageContent = content.find(\n  item => item.type === \"image\" && item.image\n);\n\nif (!imageContent?.image) {\n  throw new Error(\n    `Tidak menemukan generated image URL. Content: ${JSON.stringify(content)}`\n  );\n}\n\nreturn {\n  json: {\n    ...input,\n    generatedImageUrl: imageContent.image\n  }\n};"
+      },
+      "id": "7693d4b3-84e3-411e-8651-d02fa6ef099d",
+      "name": "Extract Generated Image URL",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2864,
+        -128
+      ]
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.generatedImageUrl }}",
+        "options": {}
+      },
+      "id": "58414f20-2eb5-42dc-882b-07760402ea44",
+      "name": "Download Generated Image",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        3056,
+        -128
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "operation": "sendPhoto",
+        "chatId": "={{ $('Telegram Trigger').first().json.message.chat.id }}",
+        "binaryData": true,
+        "additionalFields": {}
+      },
+      "id": "565dfd09-986e-4df5-8cd9-2a1de94aba19",
+      "name": "Send Poster to Telegram",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1,
+      "position": [
+        3264,
+        -128
+      ],
+      "webhookId": "7038716f-a5bb-4409-b9c9-62c237e27a01",
+      "credentials": {
+        "telegramApi": {
+          "id": "FxCyyWkiEaa3oy3I",
+          "name": "Telegram account 3"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "=={{ $json.chatId || $('Telegram Trigger').item.json.message.chat.id }}",
+        "text": "=={{ $json.error?.message || '❌ Terjadi kesalahan pada proses pembuatan poster.' }}",
+        "additionalFields": {}
+      },
+      "id": "ab22c688-992f-4b29-8420-e77050e98024",
+      "name": "Send Error to Telegram",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1,
+      "position": [
+        624,
+        176
+      ],
+      "webhookId": "da41fbf0-465e-485f-bc5e-f6ad02b9b03b",
+      "credentials": {
+        "telegramApi": {
+          "id": "FxCyyWkiEaa3oy3I",
+          "name": "Telegram account 3"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const product = $json;\n\nconst productText = [\n  `Product Name: ${product.product_name || ''}`,\n  `Brand: ${product.brand || ''}`,\n  `Category: ${product.product_category || ''}`,\n  `Product Type: ${product.product_type || ''}`,\n  `Model: ${product.model || ''}`,\n  `Part Number: ${product.part_number || ''}`,\n  `Spec Length: ${product.spec_length || ''}`,\n  `Description: ${product.description || ''}`,\n  `Badge: ${product.badge || ''}`,\n  `Store: ${product.store_name || ''}`,\n  `Keywords: ${product.keywords || ''}`\n].join(' ');\n\nreturn {\n  json: {\n    ...product,\n    productText\n  }\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        832,
+        -128
+      ],
+      "id": "c301a91b-bb2a-4ac4-81a2-f010547feb41",
+      "name": "Build Product Text"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE products\nSET embedding = $1::vector\nWHERE product_name = '{{ $json.product_name.replace(/'/g, \"''\") }}'\nRETURNING\n    id,\n    product_name,\n    brand,\n    product_category,\n    embedding;",
+        "options": {
+          "queryReplacement": "={{ JSON.stringify($json.embedding) }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1456,
+        -128
+      ],
+      "id": "fbc6a572-593e-4a00-ad45-3e165c0b3617",
+      "name": "Update Product Embedding",
+      "credentials": {
+        "postgres": {
+          "id": "4ui27iDxq6EvWqeI",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const embedding = $json.embedding.values;\nconst product = $('Build Product Text').first().json;\n\nreturn {\n  json: {\n    product_name: product.product_name,\n    embedding: embedding\n  }\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1248,
+        -128
+      ],
+      "id": "0bfa87cc-b381-4964-ab84-8ea5d2939398",
+      "name": "Code - Prepare Embedding Update"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT\n    id,\n    product_name,\n    embedding IS NOT NULL AS has_embedding\nFROM products;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1648,
+        -128
+      ],
+      "id": "5276f5b4-5703-4d7b-8a60-7ff61a3aa8f2",
+      "name": "Vector Search",
+      "credentials": {
+        "postgres": {
+          "id": "4ui27iDxq6EvWqeI",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const product = $input.first().json;\n\nconst productText = [\n  product.product_name,\n  product.brand,\n  product.product_category,\n  product.product_type,\n  product.model,\n  product.part_number,\n  product.description,\n  product.keywords\n]\n.filter(v => v !== null && v !== undefined && String(v).trim() !== '')\n.join(' | ');\n\nreturn [{\n  json: {\n    ...product,\n    productText\n  }\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1856,
+        -128
+      ],
+      "id": "2c15d9d4-1da2-431b-ae46-eeec7ec89064",
+      "name": "Prepared Data RAG"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Telegram Trigger": {
+      "main": [
+        [
+          {
+            "node": "Convert Image to Base64",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Convert Image to Base64": {
+      "main": [
+        [
+          {
+            "node": "Gemini Vision - Product Identification",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gemini Vision - Product Identification": {
+      "main": [
+        [
+          {
+            "node": "Parse Product Identification",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send Error to Telegram",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Product Identification": {
+      "main": [
+        [
+          {
+            "node": "Build Product Text",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gemini Embedding": {
+      "main": [
+        [
+          {
+            "node": "Code - Prepare Embedding Update",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "RAG Ranking": {
+      "main": [
+        [
+          {
+            "node": "Build RAG Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build RAG Context": {
+      "main": [
+        [
+          {
+            "node": "Build Wan Prompt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Wan Prompt": {
+      "main": [
+        [
+          {
+            "node": "Wan 2.7 Image Editing",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wan 2.7 Image Editing": {
+      "main": [
+        [
+          {
+            "node": "Extract Generated Image URL",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send Error to Telegram",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Generated Image URL": {
+      "main": [
+        [
+          {
+            "node": "Download Generated Image",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Download Generated Image": {
+      "main": [
+        [
+          {
+            "node": "Send Poster to Telegram",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Send Error to Telegram",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Product Text": {
+      "main": [
+        [
+          {
+            "node": "Gemini Embedding",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Product Embedding": {
+      "main": [
+        [
+          {
+            "node": "Vector Search",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code - Prepare Embedding Update": {
+      "main": [
+        [
+          {
+            "node": "Update Product Embedding",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Vector Search": {
+      "main": [
+        [
+          {
+            "node": "Prepared Data RAG",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepared Data RAG": {
+      "main": [
+        [
+          {
+            "node": "RAG Ranking",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": false
+  },
+  "versionId": "258aafc0-edae-4a62-93b1-f798a06aee18",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "ef6ee24c6b8fed1ece6fd15f3b339ab1edab95bc9059b4b5161b5eac3a3eedcd"
+  },
+  "id": "6ewYaHXKKRhbmpW9",
+  "tags": []
+}
