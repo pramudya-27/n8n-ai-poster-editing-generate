@@ -9,8 +9,10 @@ Cukup kirimkan foto *spare part* via **Telegram**, dan bot akan memproses identi
 ## 🖼️ Workflow Architecture
 
 ![n8n Workflow Canvas](./workflow.png)
-*(Catatan: Simpan screenshot canvas n8n kamu dengan nama `workflow.png` di folder repository yang sama)*
 
+## 🖼️ Testimoni
+
+![Bukti test](./dokumentasi.png)
 ---
 
 ## 🚀 Alur Kerja (End-to-End Flow)
