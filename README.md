@@ -1,4 +1,4 @@
-# 🛵 AI Product Poster Generator (n8n + RAG + Wan 2.7)
+# 🛵 AI Automation Product Poster Edit Generator
 
 Automasi pembuatan poster produk *e-commerce* suku cadang motor secara otomatis menggunakan **n8n**, **Gemini Vision**, **Supabase Vector Search (RAG)**, dan **Wan 2.7 Multimodal Image Generation**.
 
